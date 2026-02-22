@@ -1,5 +1,7 @@
 package com.baran.medxr.repository
 
+import com.baran.medxr.model.AgentResponse
+
 /**
  * Abstraction over the LLM data source.
  *
@@ -7,5 +9,5 @@ package com.baran.medxr.repository
  * errors are modelled as values.
  */
 interface LlmRepository {
-    suspend fun ask(prompt: String): Result<String>
+    suspend fun ask(prompt: String): Result<AgentResponse>
 }

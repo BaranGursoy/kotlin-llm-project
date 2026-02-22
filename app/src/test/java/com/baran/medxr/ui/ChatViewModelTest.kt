@@ -1,5 +1,7 @@
 package com.baran.medxr.ui
 
+import com.baran.medxr.model.AgentResponse
+import com.baran.medxr.model.ChatEntry
 import com.baran.medxr.repository.LlmRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -14,84 +16,121 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * Unit tests for [ChatViewModel].
- *
- * Uses a [FakeLlmRepository] to verify state transitions
- * without hitting the real network.
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
 
     @Before
-    fun setUp() {
-        Dispatchers.setMain(testDispatcher)
-    }
+    fun setUp() { Dispatchers.setMain(testDispatcher) }
 
     @After
-    fun tearDown() {
-        Dispatchers.resetMain()
-    }
-
-    // ── Helpers ────────────────────────────────────────────────────────────
+    fun tearDown() { Dispatchers.resetMain() }
 
     private class FakeLlmRepository(
-        private val result: Result<String>
+        private val result: Result<AgentResponse>
     ) : LlmRepository {
-        override suspend fun ask(prompt: String): Result<String> = result
+        var lastPrompt: String? = null
+            private set
+
+        override suspend fun ask(prompt: String): Result<AgentResponse> {
+            lastPrompt = prompt
+            return result
+        }
     }
 
-    private fun createViewModel(result: Result<String>): ChatViewModel {
-        return ChatViewModel(FakeLlmRepository(result))
-    }
+    private val sampleResponse = AgentResponse(
+        patientMessage = "Test response",
+        xrSceneRecommendation = "Cardiology",
+        urgencyLevel = "Low",
+        avatarEmotionTrigger = "calming"
+    )
 
     // ── Tests ──────────────────────────────────────────────────────────────
 
     @Test
-    fun `initial state is Idle`() {
-        val viewModel = createViewModel(Result.success(""))
-        assertEquals(UiState.Idle, viewModel.uiState.value)
+    fun `initial state is Idle with empty history`() {
+        val vm = ChatViewModel(FakeLlmRepository(Result.success(sampleResponse)))
+        assertEquals(UiState.Idle, vm.uiState.value)
+        assertTrue(vm.chatHistory.value.isEmpty())
     }
 
     @Test
-    fun `sendMessage ends in Success on successful call`() = runTest {
-        val expected = "Test response"
-        val viewModel = createViewModel(Result.success(expected))
+    fun `sendMessage appends user and assistant messages to history`() = runTest {
+        val vm = ChatViewModel(FakeLlmRepository(Result.success(sampleResponse)))
 
-        viewModel.sendMessage("Hello")
-
-        // Allow the coroutine to complete
+        vm.sendMessage("Hello")
         advanceUntilIdle()
 
-        val state = viewModel.uiState.value
-        assertTrue("Expected Success but got $state", state is UiState.Success)
-        assertEquals(expected, (state as UiState.Success).response)
+        val history = vm.chatHistory.value
+        assertEquals(2, history.size)
+        assertTrue(history[0] is ChatEntry.UserMessage)
+        assertEquals("Hello", (history[0] as ChatEntry.UserMessage).text)
+        assertTrue(history[1] is ChatEntry.AssistantMessage)
+        assertEquals(sampleResponse, (history[1] as ChatEntry.AssistantMessage).agentResponse)
+        assertEquals(UiState.Idle, vm.uiState.value)
     }
 
     @Test
-    fun `sendMessage ends in Error on failure`() = runTest {
-        val errorMessage = "Network error"
-        val viewModel = createViewModel(Result.failure(RuntimeException(errorMessage)))
+    fun `sendMessage keeps user message but sets Error on failure`() = runTest {
+        val vm = ChatViewModel(
+            FakeLlmRepository(Result.failure(RuntimeException("Network error")))
+        )
 
-        viewModel.sendMessage("Hello")
-
+        vm.sendMessage("Hello")
         advanceUntilIdle()
 
-        val state = viewModel.uiState.value
-        assertTrue("Expected Error but got $state", state is UiState.Error)
-        assertEquals(errorMessage, (state as UiState.Error).message)
+        val history = vm.chatHistory.value
+        assertEquals(1, history.size) // only user message
+        assertTrue(vm.uiState.value is UiState.Error)
     }
 
     @Test
-    fun `sendMessage with blank prompt is ignored`() = runTest {
-        val viewModel = createViewModel(Result.success("response"))
+    fun `blank prompt is ignored`() = runTest {
+        val vm = ChatViewModel(FakeLlmRepository(Result.success(sampleResponse)))
 
-        viewModel.sendMessage("   ")
+        vm.sendMessage("   ")
         advanceUntilIdle()
 
-        // Should remain Idle — blank prompts are no-ops
-        assertEquals(UiState.Idle, viewModel.uiState.value)
+        assertTrue(vm.chatHistory.value.isEmpty())
+        assertEquals(UiState.Idle, vm.uiState.value)
+    }
+
+    @Test
+    fun `wearable toggle prepends sensor data`() = runTest {
+        val repo = FakeLlmRepository(Result.success(sampleResponse))
+        val vm = ChatViewModel(repo)
+
+        vm.toggleWearable(true)
+        vm.sendMessage("chest pain")
+        advanceUntilIdle()
+
+        assertTrue(repo.lastPrompt!!.startsWith("[WEARABLE DATA:"))
+        assertTrue(repo.lastPrompt!!.contains("chest pain"))
+    }
+
+    @Test
+    fun `wearable toggle off sends raw prompt`() = runTest {
+        val repo = FakeLlmRepository(Result.success(sampleResponse))
+        val vm = ChatViewModel(repo)
+
+        vm.toggleWearable(false)
+        vm.sendMessage("chest pain")
+        advanceUntilIdle()
+
+        assertEquals("chest pain", repo.lastPrompt)
+    }
+
+    @Test
+    fun `multiple messages build conversation history`() = runTest {
+        val vm = ChatViewModel(FakeLlmRepository(Result.success(sampleResponse)))
+
+        vm.sendMessage("First")
+        advanceUntilIdle()
+        vm.sendMessage("Second")
+        advanceUntilIdle()
+
+        val history = vm.chatHistory.value
+        assertEquals(4, history.size) // 2 user + 2 assistant
     }
 }

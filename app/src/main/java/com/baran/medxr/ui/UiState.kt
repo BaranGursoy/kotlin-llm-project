@@ -1,23 +1,21 @@
 package com.baran.medxr.ui
 
+import com.baran.medxr.model.AgentResponse
+
 /**
- * Sealed interface modelling every possible screen state.
+ * Sealed interface modelling the transient operation state.
  *
- * Using a sealed interface (rather than a sealed class) is idiomatic
- * Kotlin — it allows both `data object` singletons and `data class`
- * variants, and the compiler can verify exhaustive `when` branches.
+ * The conversation history is maintained separately in [ChatViewModel.chatHistory].
+ * This state only tracks whether we are idle, loading, or in an error state.
  */
 sealed interface UiState {
 
-    /** No request has been made yet. */
+    /** Ready for input / conversation flowing normally. */
     data object Idle : UiState
 
     /** A request is in-flight. */
     data object Loading : UiState
 
-    /** The LLM returned a successful response. */
-    data class Success(val response: String) : UiState
-
-    /** Something went wrong. */
+    /** Something went wrong with the latest request. */
     data class Error(val message: String) : UiState
 }

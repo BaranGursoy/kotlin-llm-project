@@ -1,5 +1,6 @@
 package com.baran.medxr.ui
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,74 +10,136 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.baran.medxr.model.AgentResponse
+import com.baran.medxr.model.ChatEntry
 
 /**
  * Main chat screen composable.
  *
- * Observes [ChatViewModel.uiState] via [collectAsState] and renders
- * the appropriate UI for each [UiState] variant.
+ * Displays a scrollable chat history with user and assistant messages,
+ * plus a wearable toggle and STT mic button.
  */
 @Composable
 fun ChatScreen(
     viewModel: ChatViewModel,
+    inputText: String,
+    onInputChange: (String) -> Unit,
+    onMicClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var inputText by rememberSaveable { mutableStateOf("") }
+    val chatHistory by viewModel.chatHistory.collectAsState()
+    val wearableEnabled by viewModel.wearableEnabled.collectAsState()
+    val listState = rememberLazyListState()
+
+    // Auto-scroll to bottom when new messages arrive
+    LaunchedEffect(chatHistory.size) {
+        if (chatHistory.isNotEmpty()) {
+            listState.animateScrollToItem(chatHistory.size - 1)
+        }
+    }
 
     Column(
-        modifier = modifier
-            .fillMaxSize()
+        modifier = modifier.fillMaxSize()
     ) {
         // ── Header ─────────────────────────────────────────────────────────
-        Text(
-            text = "MedXR Companion",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-        )
-
-        // ── Conversation area ──────────────────────────────────────────────
-        Box(
+        Row(
             modifier = Modifier
-                .weight(1f)
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            contentAlignment = Alignment.Center
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            when (val state = uiState) {
-                is UiState.Idle -> IdleContent()
-                is UiState.Loading -> LoadingContent()
-                is UiState.Success -> SuccessContent(response = state.response)
-                is UiState.Error -> ErrorContent(
-                    message = state.message,
-                    onRetry = { viewModel.sendMessage(inputText) }
+            Text(
+                text = "MedXR Companion",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = if (wearableEnabled) "⌚ Synced" else "⌚ Off",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Spacer(modifier = Modifier.width(4.dp))
+                Switch(
+                    checked = wearableEnabled,
+                    onCheckedChange = { viewModel.toggleWearable(it) }
+                )
+            }
+        }
+
+        // ── Chat history ───────────────────────────────────────────────────
+        if (chatHistory.isEmpty() && uiState is UiState.Idle) {
+            // Empty state
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                IdleContent()
+            }
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(chatHistory) { entry ->
+                    when (entry) {
+                        is ChatEntry.UserMessage -> UserBubble(text = entry.text)
+                        is ChatEntry.AssistantMessage -> AssistantBubble(
+                            agentResponse = entry.agentResponse
+                        )
+                    }
+                }
+
+                // Loading indicator at the bottom
+                if (uiState is UiState.Loading) {
+                    item { LoadingIndicator() }
+                }
+
+                // Error card at the bottom
+                if (uiState is UiState.Error) {
+                    item {
+                        ErrorCard(
+                            message = (uiState as UiState.Error).message,
+                            onRetry = { viewModel.sendMessage(inputText) }
+                        )
+                    }
+                }
             }
         }
 
@@ -89,17 +152,23 @@ fun ChatScreen(
         ) {
             OutlinedTextField(
                 value = inputText,
-                onValueChange = { inputText = it },
+                onValueChange = onInputChange,
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Ask a medical question…") },
+                placeholder = { Text("Describe your symptoms…") },
                 shape = RoundedCornerShape(24.dp),
                 singleLine = true
             )
-
+            IconButton(onClick = onMicClick) {
+                Icon(
+                    painter = painterResource(id = android.R.drawable.ic_btn_speak_now),
+                    contentDescription = "Speech to Text",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
             IconButton(
                 onClick = {
                     viewModel.sendMessage(inputText)
-                    inputText = ""
+                    onInputChange("")
                 },
                 enabled = inputText.isNotBlank() && uiState !is UiState.Loading
             ) {
@@ -112,18 +181,110 @@ fun ChatScreen(
     }
 }
 
-// ── Sub-composables for each state ─────────────────────────────────────────────
+// ── Message bubbles ────────────────────────────────────────────────────────────
+
+@Composable
+private fun UserBubble(text: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End
+    ) {
+        Card(
+            modifier = Modifier.widthIn(max = 300.dp),
+            shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primary
+            )
+        ) {
+            Text(
+                text = text,
+                modifier = Modifier.padding(12.dp),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onPrimary
+            )
+        }
+    }
+}
+
+@Composable
+private fun AssistantBubble(agentResponse: AgentResponse) {
+    Column {
+        // Patient message card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 320.dp),
+            shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            )
+        ) {
+            Text(
+                text = agentResponse.patientMessage,
+                modifier = Modifier.padding(12.dp),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // System Debug Data card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Text(
+                    text = "⚙ System Debug Data",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                DebugRow(label = "XR Scene", value = agentResponse.xrSceneRecommendation)
+                DebugRow(label = "Urgency", value = agentResponse.urgencyLevel)
+                DebugRow(label = "Avatar Emotion", value = agentResponse.avatarEmotionTrigger)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DebugRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 1.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+// ── Transient state composables ────────────────────────────────────────────────
 
 @Composable
 private fun IdleContent() {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            text = "👋",
-            style = MaterialTheme.typography.displayMedium
-        )
+        Text(text = "👋", style = MaterialTheme.typography.displayMedium)
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = "Ask me anything about medical topics",
+            text = "Describe your symptoms to begin triage",
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -132,12 +293,18 @@ private fun IdleContent() {
 }
 
 @Composable
-private fun LoadingContent() {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        CircularProgressIndicator(modifier = Modifier.size(48.dp))
-        Spacer(modifier = Modifier.height(16.dp))
+private fun LoadingIndicator() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+        Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = "Thinking…",
+            text = "Analyzing…",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -145,62 +312,31 @@ private fun LoadingContent() {
 }
 
 @Composable
-private fun SuccessContent(response: String) {
-    val scrollState = rememberScrollState()
-    Column(
+private fun ErrorCard(message: String, onRetry: () -> Unit) {
+    Card(
         modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
     ) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            )
-        ) {
+        Column(modifier = Modifier.padding(12.dp)) {
             Text(
-                text = response,
-                modifier = Modifier.padding(16.dp),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                text = "Something went wrong",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onErrorContainer
             )
-        }
-    }
-}
-
-@Composable
-private fun ErrorContent(message: String, onRetry: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Card(
-            modifier = Modifier
-                .widthIn(max = 360.dp)
-                .padding(vertical = 8.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer
             )
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "Something went wrong",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onErrorContainer
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onErrorContainer
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        TextButton(onClick = onRetry) {
-            Text("Retry")
+            Spacer(modifier = Modifier.height(4.dp))
+            TextButton(onClick = onRetry) { Text("Retry") }
         }
     }
 }
