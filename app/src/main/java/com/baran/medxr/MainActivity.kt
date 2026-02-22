@@ -21,11 +21,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
+import com.baran.medxr.data.AppDatabase
 import com.baran.medxr.network.RetrofitClient
 import com.baran.medxr.repository.LlmRepositoryImpl
 import com.baran.medxr.ui.ChatScreen
 import com.baran.medxr.ui.ChatViewModel
 import com.baran.medxr.ui.theme.MedXrCompanionTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -46,13 +49,27 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         // ── Manual dependency wiring (no DI framework) ─────────────────
+
+        // 1. Room Database
+        val database = AppDatabase.getInstance(this)
+        val dao = database.chatMessageDao()
+
+        // 2. Repository
         val repository = LlmRepositoryImpl(
             apiService = RetrofitClient.geminiApiService,
-            apiKey = BuildConfig.GEMINI_API_KEY
+            apiKey = BuildConfig.GEMINI_API_KEY,
+            dao = dao
         )
+
+        // 3. Seed the system prompt on first launch
+        lifecycleScope.launch {
+            repository.seedIfEmpty()
+        }
+
+        // 4. ViewModel (takes both repository AND dao)
         val viewModel = ViewModelProvider(
             this,
-            ChatViewModel.factory(repository)
+            ChatViewModel.factory(repository, dao)
         )[ChatViewModel::class.java]
 
         // ── Speech Recognizer setup ────────────────────────────────────

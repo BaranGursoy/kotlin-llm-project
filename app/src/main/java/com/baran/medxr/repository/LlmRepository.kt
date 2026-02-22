@@ -9,5 +9,9 @@ import com.baran.medxr.model.AgentResponse
  * errors are modelled as values.
  */
 interface LlmRepository {
-    suspend fun ask(prompt: String): Result<AgentResponse>
+    /**
+     * @param prompt         The full prompt sent to the LLM (may include wearable prefix).
+     * @param displayPrompt  The clean user text stored in Room for display.
+     */
+    suspend fun ask(prompt: String, displayPrompt: String): Result<AgentResponse>
 }

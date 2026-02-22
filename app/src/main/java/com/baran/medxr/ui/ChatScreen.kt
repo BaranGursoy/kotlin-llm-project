@@ -84,6 +84,14 @@ fun ChatScreen(
                 fontWeight = FontWeight.Bold
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Clear chat button
+                IconButton(onClick = { viewModel.clearChat() }) {
+                    Icon(
+                        painter = painterResource(id = android.R.drawable.ic_menu_delete),
+                        contentDescription = "Clear Chat",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Text(
                     text = if (wearableEnabled) "⌚ Synced" else "⌚ Off",
                     style = MaterialTheme.typography.labelSmall,
@@ -142,6 +150,17 @@ fun ChatScreen(
                 }
             }
         }
+
+        // ── Disclaimer ─────────────────────────────────────────────────────
+        Text(
+            text = "For informational purposes only. This agent does not replace professional medical advice.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        )
 
         // ── Input bar ──────────────────────────────────────────────────────
         Row(
